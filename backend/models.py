@@ -21,6 +21,7 @@ class Thumbnail(SQLModel, table=True): # if table=false or not given, it works o
     status: str = Field(default="not started")
     created_at: datetime = Field(default_factory=_now)
     error_message: Optional[str] = Field(default=None)
+    image_url: Optional[str] = Field(default="")
 
 
     job: Optional["Job"] = Relationship(back_populates="thumbnails")
@@ -35,7 +36,7 @@ class Job(SQLModel, table=True):
     id: str = Field(default_factory=_uuid, primary_key=True)
     prompt: str = Field(default="")
     num_thumbnails: int = Field(default=1, gt=0, lt=4)
-    headshot_url: str = Field(default="")
+    original_image_url: str = Field(default="")
     status: str = Field(default="not started")
     created_at: datetime = Field(default_factory=_now)
 
