@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional, List
 from uuid import uuid4
+from pydantic import BaseModel
 
 
 from sqlmodel import Field, Relationship, SQLModel
@@ -49,3 +50,31 @@ class Job(SQLModel, table=True):
 
     
 
+class CreateJobRequest(BaseModel):
+    prompt: str
+    num_thumbnails: int
+    original_image_url: str
+    style: Optional[str]
+
+class CreateJobResponse(BaseModel):
+    job_id: str
+    style: str
+
+class ThumbnailResponse(BaseModel):
+    id: str
+    style_name: str
+    status: str
+    created_at: datetime
+    error_message: Optional[str]
+    image_url: Optional[str]
+    variants: Optional[dict]
+
+
+class JobResponse(BaseModel):
+
+    id: int
+    prompt: str
+    num_thumbnails: int
+    image_url: str
+    status: str
+    thumbnails: Optional[List[ThumbnailResponse]]

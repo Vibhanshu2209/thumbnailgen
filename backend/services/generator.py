@@ -4,12 +4,13 @@ from typing import List
 
 from sqlmodel import Session, select
 from database import engine
-from models import Job, Thumbnail
+from schemas.models import Job, Thumbnail
 from services.openai_service import generate_image
 from services.imagekit_service import upload_file
 
 logger = logging.getLogger(__name__)
 
+### TODO : add STYLES to db so that user is able to add his own styles with the prompt.
 STYLES = {
     "bold_dramatic": "High-contrast chiaroscuro lighting, deep shadows, cinematic atmosphere, intense color grading, sharp focus, hyper-realistic textures, moody and powerful composition.",
     
@@ -17,6 +18,8 @@ STYLES = {
     
     "vibrant_energy": "Saturated neon colors, dynamic motion blur, explosive composition, high-shutter speed capture, glowing light trails, electric atmosphere, vivid and high-key lighting.",
 }
+
+
 
 
 
@@ -29,7 +32,7 @@ async def generate_single_thumbnail(thumbnail_id: str, prompt: str, image_url: s
 
     with Session(engine) as session:
         thumbobj = session.get(Thumbnail, thumbnail_id)
-        thumbobj.status = "generating"
+        thumbobj.status = "working"
         job_id = thumbobj.job_id
         style = thumbobj.style_name
         session.add(thumbobj)
@@ -47,7 +50,7 @@ async def generate_single_thumbnail(thumbnail_id: str, prompt: str, image_url: s
         with Session(engine) as session:
             thumbobj = session.get(Thumbnail, thumbnail_id)
             thumbobj.image_url = url
-            thumbobj.status = "completed"
+            thumbobj.status = "processed"
             session.add(thumbobj)
             session.commit()
 
