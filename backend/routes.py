@@ -22,10 +22,11 @@ router = APIRouter(prefix="/api")
 @router.post("/upload-image")
 async def upload_reference_image(file: UploadFile = File(...)):
     contents = await file.read()
+    print("Contents availalbe for file")
 
     url = upload_file(
         file_bytes=contents,
-        file_name=f"{file.filename}" or "temp.png",
+        file_name=file.filename or "temp.png",
         folder_name="reference_images",
         content_type=file.content_type or "content/png"
     )
@@ -70,12 +71,30 @@ async def list_jobs(session: Session = Depends(get_session)):
 
     jobs_response = []
     for j in all_jobs:
+        thumbnails_for_job = session.exec(
+            select(Thumbnail).where(Thumbnail.job_id == j.id)).all()
+
+        thumbs_response = []
+        for t in thumbnails_for_job:
+            variants = get_variants(t.image_url) if t.image_url else None
+            thumb_resp = ThumbnailResponse(
+                id=t.id,
+                style_name=t.style_name,
+                status=t.status,
+                created_at=t.created_at,
+                error_message=t.error_message,
+                image_url=t.image_url,
+                variants=variants
+            )
+            thumbs_response.append(thumb_resp)
+
         job_resp = JobResponse(
             id=j.id,
             image_url=j.original_image_url,
             num_thumbnails=j.num_thumbnails,
             prompt=j.prompt,
-            status=j.status
+            status=j.status,
+            thumbnails=thumbs_response
         )
         jobs_response.append(job_resp)
 
@@ -98,7 +117,9 @@ async def get_job(job_id: str, session: Session = Depends(get_session)):
             id=t.id,
             style_name=t.style_name,
             status=t.status,
+            created_at=t.created_at,
             error_message=t.error_message,
+            image_url=t.image_url,
             variants=variants
         )
         thumbs_response.append(thumb_resp)
@@ -119,22 +140,30 @@ async def get_job(job_id: str, session: Session = Depends(get_session)):
 async def stream_job(job_id: str):
 
     async def event_generator():
+        logger.info(f"Starting event stream for job {job_id}")
         sent_thumbnails = set()
         while True:
             with Session(engine) as session:
                 job = session.get(Job, job_id)
                 if not job:
-                    yield f"event: error\n data: {json.dumps({"error", "Job not found"})}"
+                    logger.error(f"Job {job_id} not found in database")
+                    yield f"event: error\n data: {json.dumps({'error': 'Job not found'})}"
                     return
+                logger.debug(f"Retrieved job {job_id} with status {job.status}")
+                
                 thumbnails = session.exec(
                     select(Thumbnail).where(Thumbnail.job_id == job_id)
                 ).all()
-
+                logger.debug(f"Retrieved {len(thumbnails)} thumbnails for job {job_id}")
 
                 for t in thumbnails:
-                    if t.id in sent_thumbnails: continue
+                    logger.info(f"Checking thumbnail {t.id} with status {t.status} for job {job_id}")
+                    if t.id in sent_thumbnails:
+                        logger.debug(f"Thumbnail {t.id} already sent, skipping")
+                        continue
 
                     if t.status == "processed":
+                        logger.info(f"Thumbnail {t.id} is processed, sending READY event")
                         variants = get_variants(t.image_url)
                         data = json.dumps({
                             "thumbnail_id" : t.id,
@@ -145,8 +174,11 @@ async def stream_job(job_id: str):
 
                         yield f"event: thumbnail READY \n Response: {data}"
                         sent_thumbnails.add(t.id)
+                        logger.debug(f"Sent READY event for thumbnail {t.id}")
 
                     elif t.status == "failed":
+                        logger.warning(f"Thumbnail {t.id} failed with error: {t.error_message}")
+                        variants = get_variants(t.image_url) if t.image_url else None
                         data = json.dumps({
                             "thumbnail_id" : t.id,
                             "style_name" : t.style_name,
@@ -156,19 +188,28 @@ async def stream_job(job_id: str):
 
                         yield f"event: thumbnail FAILED \n Response: {data}"
                         sent_thumbnails.add(t.id)
-
-                    all_done = all(t.status in ("completed", "failed") for t in thumbnails)
-                    if all_done and len(sent_thumbnails) == len(thumbnails):
-                        data = json.dumps({
-                            "job_id": job_id,
-                            "status": job.status
-                        })
-                        yield f"event: job COMPLETED \n Response: {data}"
-                        return
+                        logger.debug(f"Sent FAILED event for thumbnail {t.id}")
                     
+                    else:
+                        logger.debug(f"Thumbnail {t.id} has status '{t.status}', still processing...")
+
+                all_done = all(t.status in ("processed", "failed") for t in thumbnails)
+                logger.debug(f"All done check for job {job_id}: {all_done} (sent: {len(sent_thumbnails)}/{len(thumbnails)})")
+                
+                if all_done and len(sent_thumbnails) == len(thumbnails):
+                    logger.info(f"All thumbnails processed for job {job_id}, sending job COMPLETED event")
+                    data = json.dumps({
+                        "job_id": job_id,
+                        "status": job.status
+                    })
+                    yield f"event: job COMPLETED \n Response: {data}"
+                    logger.info(f"Event stream completed for job {job_id}")
+                    return
+                    
+                logger.debug(f"Job {job_id} not complete, waiting before next check")
             await asyncio.sleep(5)        
 
-
+    logger.info(f"Setting up event stream for job {job_id}")
 
     return StreamingResponse(
         content=event_generator(),

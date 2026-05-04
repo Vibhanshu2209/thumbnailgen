@@ -13,7 +13,7 @@ def upload_file(file_bytes: bytes, file_name: str, folder_name: str, content_typ
     """
 
     response = imagekit.files.upload(
-        file=(file_bytes, file_name, content_type),
+        file=(file_name, file_bytes, content_type),
         file_name=file_name,
         folder=folder_name,
         is_private_file=False,

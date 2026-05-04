@@ -64,7 +64,7 @@ class ThumbnailResponse(BaseModel):
     id: str
     style_name: str
     status: str
-    created_at: datetime
+    created_at: Optional[datetime]
     error_message: Optional[str]
     image_url: Optional[str]
     variants: Optional[dict]
@@ -72,9 +72,9 @@ class ThumbnailResponse(BaseModel):
 
 class JobResponse(BaseModel):
 
-    id: int
+    id: str
     prompt: str
     num_thumbnails: int
     image_url: str
     status: str
-    thumbnails: Optional[List[ThumbnailResponse]]
+    thumbnails: List[ThumbnailResponse] | None
