@@ -8,6 +8,11 @@ engine = create_engine(DB_URL, echo=True,
 
 
 def create_tables():
+    """
+    It is called by async context manager and create all the tables using the models
+    which inherits SQLModel and given table=true
+    example: class Thumbnail(SQLModel, table=True)
+    """
     SQLModel.metadata.create_all(engine)
 
 
