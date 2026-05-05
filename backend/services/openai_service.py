@@ -1,10 +1,11 @@
 import base64
+import logging
 from openai import AsyncOpenAI
 
 from config import OPENAI_API_KEY, OPENAI_IMAGE_MODEL, OPENAI_MODEL
 
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-
+logger = logging.getLogger(__name__)
 
 async def generate_image(
         prompt: str, 
@@ -20,6 +21,7 @@ async def generate_image(
     Returns the raw image bytes
     """
 
+    logger.info(f"Generating image with prompt: {prompt}, style_prompt: {style_prompt}, reference_image_url: {reference_image_url}, is_reference_image_human_face: {is_reference_image_human_face}")   
     full_prompt = (
         f"{style_prompt}\n\n"
         f"User request: {prompt}\n\n"
@@ -28,6 +30,8 @@ async def generate_image(
     if is_reference_image_human_face:
         full_prompt += "IMPORTANT: The generated thumbnail MUST prominently feature the person shown in the provided reference headshot photo. Keep their likeness accurate."
 
+    logger.info(f"{full_prompt = }")   
+    
     response = await client.responses.create(
         model=OPENAI_MODEL,
         input=[
