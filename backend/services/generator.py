@@ -42,11 +42,10 @@ async def generate_single_thumbnail(thumbnail_id: str, prompt: str, image_url: s
     logger.debug(f"{job_id = }")
     logger.debug(f"{style = }")
 
-    style_prompt = STYLES[style]
 
     try:
-        image_bytes = generate_image(prompt=prompt, style_prompt=style_prompt, reference_image_url=image_url)
-        url = upload_file(file_bytes=image_bytes, file_name=f"{thumbnail_id}.png", folder_name=f"thumbnails/{job_id}/")
+        image_bytes = await generate_image(prompt=prompt, style_prompt=style, reference_image_url=image_url)
+        url = await upload_file(file_bytes=image_bytes, file_name=f"{thumbnail_id}.png", folder_name=f"thumbnails/{job_id}/")
         with Session(engine) as session:
             thumbobj = session.get(Thumbnail, thumbnail_id)
             thumbobj.image_url = url
@@ -66,41 +65,62 @@ async def generate_single_thumbnail(thumbnail_id: str, prompt: str, image_url: s
             session.commit()
 
 
+        ## check a1cc136a-bca3-49b2-aa69-b9986ded72d7 error message
+
+
 async def process_job(job_id: str):
+
+    logger.info(f"🚀 process_job started for job_id={job_id}")
 
     prompt = ""
     thumbnails = []
     thumb_ids = []
     image_url: str = ""
 
-    with Session(engine) as session:
-        jobobj = session.get(Job, job_id)
-        jobobj.status = "processing"
-        prompt = jobobj.prompt
-        image_url = jobobj.original_image_url
+    try:
+        with Session(engine) as session:
+            jobobj = session.get(Job, job_id)
+            jobobj.status = "processing"
+            prompt = jobobj.prompt
+            image_url = jobobj.original_image_url
 
-        thumbnails = session.exec(
-            select(Thumbnail).where(Thumbnail.job_id == job_id)
-        ).all()
-        thumb_ids = [t.id for t in thumbnails]
+            thumbnails = session.exec(
+                select(Thumbnail).where(Thumbnail.job_id == job_id)
+            ).all()
+            thumb_ids = [t.id for t in thumbnails]
+        
+        logger.info(f"Retrieved {len(thumb_ids)} thumbnails for job {job_id}")
 
+        tasks = [
+            generate_single_thumbnail(t_id, prompt=prompt, image_url=image_url)
+            for t_id in thumb_ids
+        ]
+        logger.info(f"Starting {len(tasks)} concurrent thumbnail generation tasks for job {job_id}")
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Log any exceptions from tasks
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(f"Task {i} failed with exception: {result}")
+        
+        logger.info(f"All tasks completed for job {job_id}")
 
-    tasks = [
-        generate_single_thumbnail(t_id, prompt=prompt, image_url=image_url)
-        for t_id in thumb_ids
-    ]
-    await asyncio.gather(*tasks, return_exceptions=True)
+        with Session(engine) as session:
+            thumbnails = session.exec(
+                select(Thumbnail).where(Thumbnail.job_id == job_id)
+            ).all()
 
-    with Session(engine) as session:
-        thumbnails = session.exec(
-            select(Thumbnail).where(Thumbnail.job_id == job_id)
-        ).all()
+            any_failed = any(t.status == "failed" for t in thumbnails)
+            job = session.get(Job, job_id)
+            job.status = "failed" if any_failed else "completed"
 
-        any_failed = any(t.status == "failed" for t in thumbnails)
-        job = session.get(Job, job_id)
-        job.status = "failed" if any_failed else "completed"
-
-        session.add(job)
-        session.commit()
+            session.add(job)
+            session.commit()
+        
+        logger.info(f"✅ process_job completed for job_id={job_id}")
+    
+    except Exception as e:
+        logger.error(f"❌ process_job failed for job_id={job_id}: {str(e)}", exc_info=True)
         
 
