@@ -18,11 +18,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
 
+sse_prefix = "data <=>"
+
 
 @router.post("/upload-image")
 async def upload_reference_image(file: UploadFile = File(...)):
     contents = await file.read()
-    print("Contents availalbe for file")
+    print("Contents available for file")
 
     url = upload_file(
         file_bytes=contents,
@@ -50,12 +52,14 @@ async def create_job(request: CreateJobRequest, session: Session = Depends(get_s
     i = list(STYLES.keys())[random.randint(0, len(STYLES.keys())-1)]
     style = STYLES[request.style] if request.style != None else STYLES[i]
 
-    thumb = Thumbnail(job_id=job.id, style_name=style)
+    thumb = Thumbnail(job_id=job.id, style_name=style, image_url=request.original_image_url)
     session.add(thumb)
 
     session.commit()
 
-    asyncio.create_task(process_job(job.id))
+    logger.info(f"✏️ Job created: {job.id} with {job.num_thumbnails} thumbnail(s)")
+    asyncio.create_task(process_job(job.id), name=f"process_job_task-{job.id}")
+    logger.info(f"📋 Background task scheduled for job: {job.id}")
 
     return CreateJobResponse(job_id=job.id, style=style)
 
@@ -140,74 +144,77 @@ async def get_job(job_id: str, session: Session = Depends(get_session)):
 async def stream_job(job_id: str):
 
     async def event_generator():
+        print(f"JobId: {job_id}")
         logger.info(f"Starting event stream for job {job_id}")
-        # sent_thumbnails = set()
+        sent_thumbnails = set()
         while True:
-            yield f"event: thumbnail READY \n Response: {json.dumps({'message': 'Thumbnail is ready!'})}\n\n"
-        #     with Session(engine) as session:
-        #         job = session.get(Job, job_id)
-        #         if not job:
-        #             logger.error(f"Job {job_id} not found in database")
-        #             return
-        #         logger.debug(f"Retrieved job {job_id} with status {job.status}")
+            yield f"{sse_prefix} {json.dumps({'message': f'ping {job_id}'})}\n\n"
+            print(f"JobId: {job_id}")
+            with Session(engine) as session:
+                job = session.get(Job, job_id)
+                if not job:
+                    logger.error(f"Job {job_id} not found in database")
+                    yield f"{sse_prefix} {json.dumps({'error': 'Job not found'})}"
+                    return
+                logger.debug(f"Retrieved job {job_id} with status {job.status}")
                 
-        #         thumbnails = session.exec(
-        #             select(Thumbnail).where(Thumbnail.job_id == job_id)
-        #         ).all()
-        #         logger.debug(f"Retrieved {len(thumbnails)} thumbnails for job {job_id}")
+                thumbnails = session.exec(
+                    select(Thumbnail).where(Thumbnail.job_id == job_id)
+                ).all()
+                logger.debug(f"Retrieved {len(thumbnails)} thumbnails for job {job_id}")
 
-        #         for t in thumbnails:
-        #             logger.info(f"Checking thumbnail {t.id} with status {t.status} for job {job_id}")
-        #             if t.id in sent_thumbnails:
-        #                 logger.debug(f"Thumbnail {t.id} already sent, skipping")
-        #                 continue
+                for t in thumbnails:
+                    logger.info(f"Checking thumbnail {t.id} with status {t.status} for job {job_id}")
+                    if t.id in sent_thumbnails:
+                        logger.debug(f"Thumbnail {t.id} already sent, skipping")
+                        continue
 
-        #             if t.status == "processed":
-        #                 logger.info(f"Thumbnail {t.id} is processed, sending READY event")
-        #                 variants = get_variants(t.image_url)
-        #                 data = json.dumps({
-        #                     "thumbnail_id" : t.id,
-        #                     "style_name" : t.style_name,
-        #                     "image_url": t.image_url,
-        #                     "variants": variants
-        #                 })
+                    if t.status == "processed":
+                        logger.info(f"Thumbnail {t.id} is processed, sending READY event")
+                        variants = get_variants(t.image_url)
+                        data = json.dumps({
+                            "thumbnail_id" : t.id,
+                            "style_name" : t.style_name,
+                            "image_url": t.image_url,
+                            "variants": variants
+                        })
 
-        #                 yield f"event: thumbnail READY \n Response: {data}"
-        #                 sent_thumbnails.add(t.id)
-        #                 logger.debug(f"Sent READY event for thumbnail {t.id}")
+                        yield f"{sse_prefix} {data}"
+                        sent_thumbnails.add(t.id)
+                        logger.debug(f"Sent READY event for thumbnail {t.id}")
 
-        #             elif t.status == "failed":
-        #                 logger.warning(f"Thumbnail {t.id} failed with error: {t.error_message}")
-        #                 variants = get_variants(t.image_url) if t.image_url else None
-        #                 data = json.dumps({
-        #                     "thumbnail_id" : t.id,
-        #                     "style_name" : t.style_name,
-        #                     "image_url": t.image_url,
-        #                     "variants": variants
-        #                 })
+                    elif t.status == "failed":
+                        logger.warning(f"Thumbnail {t.id} failed with error: {t.error_message}")
+                        variants = get_variants(t.image_url) if t.image_url else None
+                        data = json.dumps({
+                            "thumbnail_id" : t.id,
+                            "style_name" : t.style_name,
+                            "image_url": t.image_url,
+                            "variants": variants
+                        })
 
-        #                 yield f"event: thumbnail FAILED \n Response: {data}"
-        #                 sent_thumbnails.add(t.id)
-        #                 logger.debug(f"Sent FAILED event for thumbnail {t.id}")
+                        yield f"{sse_prefix} {data}"
+                        sent_thumbnails.add(t.id)
+                        logger.debug(f"Sent FAILED event for thumbnail {t.id}")
                     
         #             else:
         #                 logger.debug(f"Thumbnail {t.id} has status '{t.status}', still processing...")
 
-        #         all_done = all(t.status in ("processed", "failed") for t in thumbnails)
-        #         logger.debug(f"All done check for job {job_id}: {all_done} (sent: {len(sent_thumbnails)}/{len(thumbnails)})")
+                all_done = all(t.status in ("processed", "failed") for t in thumbnails)
+                logger.debug(f"All done check for job {job_id}: {all_done} (sent: {len(sent_thumbnails)}/{len(thumbnails)})")
                 
-        #         if all_done and len(sent_thumbnails) == len(thumbnails):
-        #             logger.info(f"All thumbnails processed for job {job_id}, sending job COMPLETED event")
-        #             data = json.dumps({
-        #                 "job_id": job_id,
-        #                 "status": job.status
-        #             })
-        #             yield f"event: job COMPLETED \n Response: {data}"
-        #             logger.info(f"Event stream completed for job {job_id}")
-        #             return
+                if all_done and len(sent_thumbnails) == len(thumbnails):
+                    logger.info(f"All thumbnails processed for job {job_id}, sending job COMPLETED event")
+                    data = json.dumps({
+                        "job_id": job_id,
+                        "status": job.status
+                    })
+                    yield f"{sse_prefix} {data}"
+                    logger.info(f"Event stream completed for job {job_id}")
+                    return
                     
-        #         logger.debug(f"Job {job_id} not complete, waiting before next check")
-            await asyncio.sleep(5)        
+                logger.debug(f"Job {job_id} not complete, waiting before next check")
+            await asyncio.sleep(15)        
 
     logger.info(f"Setting up event stream for job {job_id}")
 
@@ -220,3 +227,60 @@ async def stream_job(job_id: str):
             "X-Accel-Buffering": "no"
         }
     )
+
+
+@router.delete("/jobs/{job_id}")
+async def delete_job(job_id: str, session: Session = Depends(get_session)):
+    """Delete a job and all associated thumbnails"""
+    job = session.get(Job, job_id)
+    if not job:
+        raise HTTPException(404, f"Job {job_id} not found")
+
+    # Delete all thumbnails associated with this job
+    thumbnails = session.exec(
+        select(Thumbnail).where(Thumbnail.job_id == job_id)
+    ).all()
+    
+    for t in thumbnails:
+        session.delete(t)
+    
+    # Delete the job
+    session.delete(job)
+    session.commit()
+    
+    logger.info(f"🗑️ Job {job_id} and {len(thumbnails)} thumbnail(s) deleted")
+    
+    return {"message": f"Job {job_id} deleted successfully"}
+
+
+@router.post("/jobs/{job_id}/retry")
+async def retry_job(job_id: str, session: Session = Depends(get_session)):
+    """Retry a failed job by resetting thumbnail statuses and reprocessing"""
+    job = session.get(Job, job_id)
+    if not job:
+        raise HTTPException(404, f"Job {job_id} not found")
+    
+    if job.status != "failed":
+        raise HTTPException(400, f"Job {job_id} cannot be retried. Current status: {job.status}")
+    
+    # Reset job status
+    job.status = "processing"
+    session.add(job)
+    
+    # Reset all thumbnails
+    thumbnails = session.exec(
+        select(Thumbnail).where(Thumbnail.job_id == job_id)
+    ).all()
+    
+    for t in thumbnails:
+        t.status = "pending"
+        t.error_message = None
+        session.add(t)
+    
+    session.commit()
+    
+    # Schedule the job for reprocessing
+    asyncio.create_task(process_job(job_id), name=f"process_job_task-{job_id}")
+    logger.info(f"🔄 Retry scheduled for job {job_id} with {len(thumbnails)} thumbnail(s)")
+    
+    return {"message": f"Job {job_id} retry scheduled", "status": "processing"}
