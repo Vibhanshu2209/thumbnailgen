@@ -12,9 +12,9 @@ class StatusBadge extends StatelessWidget {
 
   Color _getStatusColor() {
     switch (status.toLowerCase()) {
-      case 'completed':
+      case 'processed':
         return AppTheme.success;
-      case 'processing':
+      case 'in_progress':
       case 'not started':
         return AppTheme.warning;
       case 'failed':
@@ -26,9 +26,9 @@ class StatusBadge extends StatelessWidget {
 
   IconData _getStatusIcon() {
     switch (status.toLowerCase()) {
-      case 'completed':
+      case 'processed':
         return Icons.check_circle;
-      case 'processing':
+      case 'in_progress':
       case 'not started':
         return Icons.schedule;
       case 'failed':
