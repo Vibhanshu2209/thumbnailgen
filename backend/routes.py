@@ -7,6 +7,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException, UploadFile, Depends, File
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
+from config import StatusEnum
 from database import get_session, engine
 
 
@@ -169,7 +170,7 @@ async def stream_job(job_id: str):
                         logger.debug(f"Thumbnail {t.id} already sent, skipping")
                         continue
 
-                    if t.status == "processed":
+                    if t.status == StatusEnum.PROCESSED:
                         logger.info(f"Thumbnail {t.id} is processed, sending READY event")
                         variants = get_variants(t.image_url)
                         data = json.dumps({
@@ -183,7 +184,7 @@ async def stream_job(job_id: str):
                         sent_thumbnails.add(t.id)
                         logger.debug(f"Sent READY event for thumbnail {t.id}")
 
-                    elif t.status == "failed":
+                    elif t.status == StatusEnum.FAILED:
                         logger.warning(f"Thumbnail {t.id} failed with error: {t.error_message}")
                         variants = get_variants(t.image_url) if t.image_url else None
                         data = json.dumps({
@@ -200,7 +201,7 @@ async def stream_job(job_id: str):
         #             else:
         #                 logger.debug(f"Thumbnail {t.id} has status '{t.status}', still processing...")
 
-                all_done = all(t.status in ("processed", "failed") for t in thumbnails)
+                all_done = all(t.status in (StatusEnum.PROCESSED, StatusEnum.FAILED) for t in thumbnails)
                 logger.debug(f"All done check for job {job_id}: {all_done} (sent: {len(sent_thumbnails)}/{len(thumbnails)})")
                 
                 if all_done and len(sent_thumbnails) == len(thumbnails):
@@ -237,12 +238,9 @@ async def delete_job(job_id: str, session: Session = Depends(get_session)):
         raise HTTPException(404, f"Job {job_id} not found")
 
     # Delete all thumbnails associated with this job
-    thumbnails = session.exec(
-        select(Thumbnail).where(Thumbnail.job_id == job_id)
-    ).all()
+    thumbnails = session.exec(select(Thumbnail).where(Thumbnail.job_id == job_id)).all()
     
-    for t in thumbnails:
-        session.delete(t)
+    for t in thumbnails: session.delete(t)
     
     # Delete the job
     session.delete(job)
@@ -256,15 +254,17 @@ async def delete_job(job_id: str, session: Session = Depends(get_session)):
 @router.post("/jobs/{job_id}/retry")
 async def retry_job(job_id: str, session: Session = Depends(get_session)):
     """Retry a failed job by resetting thumbnail statuses and reprocessing"""
+
+
     job = session.get(Job, job_id)
     if not job:
         raise HTTPException(404, f"Job {job_id} not found")
     
-    if job.status != "failed":
+    if job.status != StatusEnum.FAILED:
         raise HTTPException(400, f"Job {job_id} cannot be retried. Current status: {job.status}")
     
     # Reset job status
-    job.status = "processing"
+    job.status = StatusEnum.WORKING
     session.add(job)
     
     # Reset all thumbnails
@@ -273,7 +273,7 @@ async def retry_job(job_id: str, session: Session = Depends(get_session)):
     ).all()
     
     for t in thumbnails:
-        t.status = "pending"
+        t.status = StatusEnum.WORKING
         t.error_message = None
         session.add(t)
     
@@ -283,4 +283,4 @@ async def retry_job(job_id: str, session: Session = Depends(get_session)):
     asyncio.create_task(process_job(job_id), name=f"process_job_task-{job_id}")
     logger.info(f"🔄 Retry scheduled for job {job_id} with {len(thumbnails)} thumbnail(s)")
     
-    return {"message": f"Job {job_id} retry scheduled", "status": "processing"}
+    return {"message": f"Job {job_id} retry scheduled", "status": StatusEnum.WORKING}

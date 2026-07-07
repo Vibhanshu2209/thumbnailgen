@@ -120,3 +120,6 @@ app.*.symbols
 
 .venv
 .env
+
+.vscode
+**thumbnailbuilder.db
