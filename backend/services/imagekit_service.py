@@ -1,12 +1,14 @@
 from imagekitio import ImageKit, ImageKitError
 
-from config import IMAGEKIT_PRIVATE_KEY, IMAGEKIT_URL_ENDPOINT, TR_SHORTS, TR_SQUARE, TR_YOUTUBE
+from config import IMAGEKIT_PRIVATE_KEY, TR_SHORTS, TR_SQUARE, TR_YOUTUBE
 
 
-imagekit = ImageKit(private_key=IMAGEKIT_PRIVATE_KEY)
+imagekit = ImageKit(
+    private_key=IMAGEKIT_PRIVATE_KEY
+)
 
 
-def upload_file(file_bytes: bytes, file_name: str, folder_name: str, content_type: str = "content/png") -> str:
+def upload_file(file_bytes: bytes, file_name: str, folder_name: str, content_type: str = "image/png") -> str:
 
     """
     Upload the image to imagekit and return the CDN url
