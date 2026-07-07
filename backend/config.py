@@ -1,5 +1,7 @@
+from dataclasses import dataclass
 import os
 from dotenv import load_dotenv
+from types import SimpleNamespace
 
 load_dotenv()
 
@@ -19,3 +21,11 @@ TR_SHORTS = os.getenv("TR_SHORTS", "?tr=w-1080,h-1920,c-maintain_ratio,fo-auto")
 TR_SQUARE = os.getenv("TR_SQUARE", "?tr=w-1080,h-1080,c-maintain_ratio,fo-auto")
 
 DB_URL = "sqlite:///./thumbnailbuilder.db"
+
+
+
+from enum import StrEnum
+class StatusEnum(StrEnum):
+    PROCESSED = "processed"
+    FAILED = "failed"
+    WORKING = "in_progress"

@@ -1,8 +1,10 @@
 import asyncio
+import base64
 import logging
 from typing import List
 
 from sqlmodel import Session, select
+from config import StatusEnum
 from database import engine
 from schemas.models import Job, Thumbnail
 from services.openai_service import generate_image
@@ -32,7 +34,7 @@ async def generate_single_thumbnail(thumbnail_id: str, prompt: str, image_url: s
 
     with Session(engine) as session:
         thumbobj = session.get(Thumbnail, thumbnail_id)
-        thumbobj.status = "working"
+        thumbobj.status = StatusEnum.WORKING
         job_id = thumbobj.job_id
         style = thumbobj.style_name
         session.add(thumbobj)
@@ -44,12 +46,16 @@ async def generate_single_thumbnail(thumbnail_id: str, prompt: str, image_url: s
 
 
     try:
-        image_bytes = await generate_image(prompt=prompt, style_prompt=style, reference_image_url=image_url)
-        url = await upload_file(file_bytes=image_bytes, file_name=f"{thumbnail_id}.png", folder_name=f"thumbnails/{job_id}/")
+        image_bytes_str = await generate_image(prompt=prompt, style_prompt=style, reference_image_url=image_url)
+
+        # convert string to raw image bytes
+        image_bytes = base64.b64decode(image_bytes_str)
+
+        url = upload_file(file_bytes=image_bytes, file_name=f"{thumbnail_id}.png", folder_name=f"thumbnails/{job_id}/")
         with Session(engine) as session:
             thumbobj = session.get(Thumbnail, thumbnail_id)
             thumbobj.image_url = url
-            thumbobj.status = "processed"
+            thumbobj.status = StatusEnum.PROCESSED
             session.add(thumbobj)
             session.commit()
 
@@ -59,7 +65,7 @@ async def generate_single_thumbnail(thumbnail_id: str, prompt: str, image_url: s
         logger.error(f"Error generating thumbnails for {thumbnail_id = }")
         with Session(engine) as session:
             thumbobj = session.get(Thumbnail, thumbnail_id)
-            thumbobj.status = "failed"
+            thumbobj.status = StatusEnum.FAILED
             thumbobj.error_message = str(e)[:500]
             session.add(thumbobj)
             session.commit()
@@ -80,7 +86,7 @@ async def process_job(job_id: str):
     try:
         with Session(engine) as session:
             jobobj = session.get(Job, job_id)
-            jobobj.status = "processing"
+            jobobj.status = StatusEnum.WORKING
             prompt = jobobj.prompt
             image_url = jobobj.original_image_url
 
@@ -111,9 +117,9 @@ async def process_job(job_id: str):
                 select(Thumbnail).where(Thumbnail.job_id == job_id)
             ).all()
 
-            any_failed = any(t.status == "failed" for t in thumbnails)
+            any_failed = any(t.status == StatusEnum.FAILED for t in thumbnails)
             job = session.get(Job, job_id)
-            job.status = "failed" if any_failed else "completed"
+            job.status = StatusEnum.FAILED if any_failed else StatusEnum.PROCESSED
 
             session.add(job)
             session.commit()
