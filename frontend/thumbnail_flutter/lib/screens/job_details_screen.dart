@@ -11,9 +11,9 @@ class JobDetailsScreen extends StatefulWidget {
   final String jobId;
 
   const JobDetailsScreen({
-    Key? key,
+    super.key,
     required this.jobId,
-  }) : super(key: key);
+  });
 
   @override
   State<JobDetailsScreen> createState() => _JobDetailsScreenState();
